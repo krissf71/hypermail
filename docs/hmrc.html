@@ -3,6 +3,7 @@
 <html>
 <head>
 <title>Hypermail - hmrc list configuration</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
 <link rev="made" href="mailto:hypermail@hypermail-project.org">
 </head>
 <body bgcolor="#ffffff" text="#000000">
@@ -132,6 +133,7 @@ on or off.
   <li><a href="#prefered_types">prefered_types</a> choose from multipart/mixed
   <li><a href="#ignore_types">ignore_types</a> discard text/x-vcard, etc
   <li><a href="#attachmentlink">attachmentlink</a> control filenames
+  <li><a href="#applemail_mimehack">applemail_mimehack</a> process multipart/alternative as multipart/mixed	  
   <li><a href="#unsafe_chars">unsafe_chars</a> restrict filename chars
   <li><a href="#save_alts">save_alts</a> multipart/alternative handling
   <li><a href="#alts_text">alts_text</a> text for some save_alts choices
@@ -949,6 +951,16 @@ Format of the attachment links.
 <br>    %c for the content type string
 <br> 
 <br><i>attachmentlink = "%p"</i>
+</dd>
+
+<a name="applemail_mimehack" ></a>
+<dt><strong>applemail_mimehack [ 0 | 1 ]</strong></dt><dd>
+    Define to On to interpret Apple Mail mime multipart/alternative
+    messages as multipart/mixed. As of June 2018, Apple Mail is only
+    adding attachments to the text/html alternative. If you're using
+    text/plain as your prefered type, you won't see them unless you enable
+    this option.
+    <br><i>usemeta = 0</i> (disabled by default)
 </dd>
 
 <a name="unsafe_chars"></a>

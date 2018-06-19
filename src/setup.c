@@ -75,6 +75,9 @@ bool set_report_new_file;
 bool set_report_new_folder;
 bool set_use_sender_date;
 bool set_inline_addlink;
+bool set_applemail_mimehack;
+char *set_applemail_ua_header;
+char *set_applemail_ua_value;
 
 int set_showhtml;
 int set_thrdlevels;
@@ -482,6 +485,23 @@ struct Config cfg[] = {
      "# $BINARY - ignore all types that would be stored as separate files.\n"
      "# $NONPLAIN - ignore all types not treated as text/plain, and all $BINARY types.\n"
      "# Note: the behavior of these may be affected by the inlinehtml option.\n", FALSE},
+
+    {"applemail_mimehack", &set_applemail_mimehack, BFALSE, CFG_SWITCH,
+     "# Set to On to process Apple Mail MIME multipart/alternative messages as\n"
+     "# multipart/mixed. Use this option if you're using text/plain\n"
+     "# as a prefered type due to Apple Mail adding attachments only\n"
+     "# to the text/html alternative (as of 06/2018).\n", FALSE},
+
+    {"applemail_ua_header", &set_applemail_ua_header, "X-Mailer", CFG_STRING,
+     "# Set to the header name that Apple Mail uses to identify its mail agent.\n"
+     "# This option is only useful if you enabled the applemail_mimehack configuration\n"
+     "# option.\n", FALSE},
+
+    {"applemail_ua_value", &set_applemail_ua_value, "Apple Mail (", CFG_STRING,
+     "# Set to the beginning of the header value that Apple Mail uses to identify\n"
+     " its mail agent. Do not add the version number unless you know what you're doing.\n"
+     "# This option is only useful if you enabled the applemail_mimehack configuration\n"
+     "# option.\n", FALSE},
 
     {"show_headers", &set_show_headers, NULL, CFG_LIST,
      "# This is the list of headers to be displayed if 'showheaders'\n"
@@ -1236,7 +1256,10 @@ void dump_config(void)
     printf("set_describe_folder = %s\n",set_describe_folder ? set_describe_folder : "Not set");
     printf("set_latest_folder = %s\n",set_latest_folder ? set_latest_folder : "Not set");
     printf("set_antispamdomain = %s\n",set_antispamdomain ? set_antispamdomain : "Not set");
-
+    printf("set_applemail_ua_header = %s\n",set_applemail_ua_header ? set_applemail_ua_header : "Not set");
+    printf("set_applemail_ua_value = %s\n",set_applemail_ua_value ? set_applemail_ua_value : "Not set");    
+    
+    
     /* Boolean or integer */
 
     printf("set_overwrite = %d\n",set_overwrite);
@@ -1284,6 +1307,7 @@ void dump_config(void)
     printf("set_delete_level = %d\n",set_delete_level);
     printf("set_delete_older = %d\n",set_delete_older);
     printf("set_delete_newer = %d\n",set_delete_newer);
+    printf("set_applemail_mimehack = %d\n",set_applemail_mimehack);    
 
     if (!set_ihtmlheader)
         printf("set_ihtmlheader = Not set\n");
