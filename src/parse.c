@@ -179,6 +179,8 @@ static int applemail_ua(char *ua_string)
     /* returns TRUE if the ua_string is one of the declared applemail
      * clients */
 
+    /* @@ JK: Add test for inline HTML and prefered type text/html over text/plain,
+       probably in the setup checks */
     int res = FALSE;
 
     if (ua_string && *ua_string != '\0') {
@@ -1275,9 +1277,6 @@ int parsemail(char *mbox,	/* file name */
     time_t delete_older_than = (set_delete_older ? convtoyearsecs(set_delete_older) : 0);
     time_t delete_newer_than = (set_delete_newer ? convtoyearsecs(set_delete_newer) : 0);
     int is_deleted = 0;
-    int parse_multipart_alternative_as_mixed = 0; /* the hack needed for applemail */
-    int old_set_save_alts = 0;
-    int applemail_ua_header_len = (set_applemail_mimehack) ? strlen (set_applemail_ua_header) : 0;
     int pos;
     bool *require_filter, *require_filter_full;
     int require_filter_len, require_filter_full_len;
@@ -1305,7 +1304,11 @@ int parsemail(char *mbox,	/* file name */
     FileStatus alternative_lastfile_created = NO_FILE;	/* previous alternative attachments, for non-inline MIME types */
     char alternative_file[129];	/* file name where we store the non-inline alternatives */
     char alternative_lastfile[129];	/* last file name where we store the non-inline alternatives */
+    char alternative_type[129];      /* the alternative Content-Type value */
     int att_counter = 0;	/* used to generate a unique name for attachments */
+    int parse_multipart_alternative_as_mixed = 0; /* used to control if we are parsing alternative as multipart */
+    int old_set_save_alts = 0;  /* used to store the set_save_alts when overriding it for apple mail */
+    int applemail_ua_header_len = (set_applemail_mimehack) ? strlen (set_applemail_ua_header) : 0; /* code optimization to avoid computing it each time */
     /* 
     ** keeps track of attachment file name used so far for this message 
     */
@@ -1330,6 +1333,9 @@ int parsemail(char *mbox,	/* file name */
 					   of boundary separators in cases with mimed 
 					   mails inside mimed mails */
 
+    struct boundary *multipartp = NULL; /* This variable is used to store a stack of
+                                           mimetypes in cases with mulitpart mails */
+    
     char multilinenoend = FALSE;	/* This variable is set TRUE if we have read 
 					   a partial line off a multiline-encoded line, 
 					   and the next line we read is supposed to get
@@ -1587,7 +1593,7 @@ int parsemail(char *mbox,	/* file name */
 			    bp = addbody(bp, &lp, line, 0);
 			}
 		    }
-                    else if (!strncasecmp (head->line, "Content-Type:", 13)) {
+                    else if (!strncasecmp(head->line, "Content-Type:", 13)) {
                         content_type_p = head;
                     }
 		    else if (!set_save_alts
@@ -1598,10 +1604,10 @@ int parsemail(char *mbox,	/* file name */
                              && !strncasecmp(head_name,
                                              set_applemail_ua_header,
                                              applemail_ua_header_len)) {
-                        /* If we need the applemail hack, set a flag
-                         * if we detected the UA */
+                        /* If the UA is an apple mail client and we're configured to do the
+                         * applemail hack, set a flag */
                         head->parsedheader = TRUE;
-                        if (applemail_ua (head->line + applemail_ua_header_len + 2)) {
+                        if (applemail_ua(head->line + applemail_ua_header_len + 2)) {
                             parse_multipart_alternative_as_mixed = 1;
                         }
                     }
@@ -1624,10 +1630,14 @@ int parsemail(char *mbox,	/* file name */
                 if (parse_multipart_alternative_as_mixed == 1) {
                     if (!strncasecmp(content_type_p->line + 14, "multipart/alternative", 21)) {
                         old_set_save_alts = set_save_alts;
-                        set_save_alts = 1;                        
+                        /* to avoid confusion and quoting out of
+                        ** context, we won't show the alternatives
+                        ** in-line.
+                        */
+                        set_save_alts = 2;                        
                     }
 
-                    /* turn off the flag to avoid redoing this check again */
+                    /* update the flag to avoid redoing this check again */
                     parse_multipart_alternative_as_mixed = 2;
                 }
 		if (!headp)
@@ -1777,6 +1787,7 @@ int parsemail(char *mbox,	/* file name */
 				/* erase the previous alternative info */
 				temp_bp = alternative_bp;	/* remember the value of bp for GC */
 				alternative_bp = alternative_lp = NULL;
+                                strcpy(alternative_type, type);
 				alternative_lastfile_created = NO_FILE;
 				content = CONTENT_UNKNOWN;
 				if (alternative_lastfile[0] != '\0') {
@@ -1785,9 +1796,9 @@ int parsemail(char *mbox,	/* file name */
 				    alternative_lastfile[0] = '\0';
 				}
 			    }
-			    else if (set_save_alts == 2)
-				content = CONTENT_BINARY;
-			    else {
+                            else if (set_save_alts == 2) {
+                                content = CONTENT_BINARY;
+                            } else {
 				/* ...and this type is not a prefered one. Thus, we
 				 * shall ignore it completely! */
 				content = CONTENT_IGNORE;
@@ -1818,7 +1829,7 @@ int parsemail(char *mbox,	/* file name */
 				/* end the header parsing... we already know what we want */
 				break;
 			}
-
+                      
 			if (content == CONTENT_IGNORE)
 			    continue;
 			else if (ignorecontent(type))
@@ -1875,6 +1886,15 @@ int parsemail(char *mbox,	/* file name */
 			     * This is not a multipart and not text 
 			     */
 			    char *fname = NULL;	/* attachment filename */
+
+                            if (parse_multipart_alternative_as_mixed
+                                && !strcasecmp(multipartp->line, "multipart/alternative")
+                                && (!strcasecmp(type, "text/html")
+                                    && *alternative_type
+                                    && !strcasecmp(alternative_type, "text/plain"))) {          
+                                content = CONTENT_IGNORE;
+                                /* @@ JK: we could do this early on and just do continue */
+                            }
 
 			    /* 
                              * only do anything here if we're not 
@@ -1975,7 +1995,8 @@ int parsemail(char *mbox,	/* file name */
 				 * of strings: 
 				 */
 				boundp = bound(boundp, boundbuffer);
-
+                                multipartp = multipart(multipartp, type);
+                                
 				/* printf("set new boundary: %s\n", boundp->line); */
 
 				/*
@@ -2095,6 +2116,7 @@ int parsemail(char *mbox,	/* file name */
 		    alternative_lp = alternative_bp = NULL;
 		    alternative_lastfile_created = NO_FILE;
 		    alternative_file[0] = alternative_lastfile[0] = '\0';
+                    alternative_type[0] = '\0';
 		}
 		headp = lp;	/* start at this point next time */
 	    }
@@ -2167,11 +2189,11 @@ int parsemail(char *mbox,	/* file name */
 		    inreply = oneunre(subject);
 
 		if (append_bp && append_bp != bp) {
-		   /* if we had attachments, close the structure */
-		    append_bp = 
-		      addbody(append_bp, &append_lp, "</div>\n",
-			      BODY_HTMLIZED | bodyflags);
-		    bp = append_body(bp, &lp, append_bp);
+                    /* if we had attachments, close the structure */
+                    append_bp = 
+                        addbody(append_bp, &append_lp, "</div>\n",
+                                BODY_HTMLIZED | bodyflags);
+                    bp = append_body(bp, &lp, append_bp);
 		    append_bp = append_lp = NULL;
 		}
 		else if(!bp)	/* probably never used */
@@ -2347,6 +2369,7 @@ msgid);
 			    if (!boundp) {
 				bodyflags &= ~BODY_ATTACHED;
 			    }
+                            multipartp = multipart(multipartp, NULL);
 			    if (alternativeparser) {
 #ifdef NOTUSED
 				struct body *next;
@@ -2360,6 +2383,7 @@ msgid);
 				alternative_lastfile_created = NO_FILE;
 				alternative_file[0] =
 				    alternative_lastfile[0] = '\0';
+                                alternative_type[0] = '\0';
 #if DEBUG_PARSE
 				printf("We DUMP the chosen alternative\n");
 #endif
@@ -2375,6 +2399,11 @@ msgid);
 				printf("back %s\n", boundp->line);
 			    else
 				printf("back to NONE\n");
+                            
+                            if (multipartp)
+                                printf("current multipart: %s\n", multipartp->line);
+			    else
+				printf("current multipart: NONE\n");
 #endif
 			}
 			else {
@@ -2389,9 +2418,17 @@ msgid);
 				    file_created;
 				strcpy(alternative_lastfile,
 				       alternative_file);
+				strcpy(alternative_type, type);
+
 				/* and now reset them */
 				headp = bp = lp = NULL;
 				alternative_file[0] = '\0';
+#if 0
+                                /* @@ JK: review if att_counter is updated even with content ignore */
+                                if (set_save_alts && parse_multipart_alternative_as_mixed) {
+                                    att_counter++;
+                                }
+#endif
 			    }
 			    else {
 				att_counter++;
@@ -2655,17 +2692,27 @@ msgid);
 					    free(meta_file);
 					}
 				    }
-				    if (alternativeparser)
+				    if (alternativeparser) {
 					/* save the last name, in case we need to supress it */
 					strncpy(alternative_file, binname,
 						sizeof(alternative_file) -
 						1);
+                                        /* save the last mime type to help deal with the 
+                                         * apple mail hack */
+					strncpy(alternative_type, type,
+						sizeof(alternative_type) -
+						1);
+                                    }
 
 				}
 				else {
-				    if (alternativeparser)
+				    if (alternativeparser) {
 					/* save the last name, in case we need to supress it */
 					alternative_file[0] = '\0';
+                                        /* save the last mime type to  help deal with the apple
+                                         * hack */
+                                        alternative_type[0] = '\0';
+                                    }
 				}
 
 				/* point to the filename and skip the separator */
@@ -2841,11 +2888,11 @@ msgid);
 	    inreply = oneunre(subject);
 
 	if (append_bp && append_bp != bp) {
-	  /* close the DIV */
-	  append_bp = 
-	    addbody(append_bp, &append_lp, "</div>\n",
-		    BODY_HTMLIZED | bodyflags);
-	    bp = append_body(bp, &lp, append_bp);
+            /* close the DIV */
+            append_bp = 
+                addbody(append_bp, &append_lp, "</div>\n",
+                        BODY_HTMLIZED | bodyflags);
+            bp = append_body(bp, &lp, append_bp);
 	    append_bp = append_lp = NULL;
 	}
 
@@ -2985,6 +3032,12 @@ msgid);
 	if (boundp->line)
 	    free(boundp->line);
 	free(boundp);
+    }
+
+    if (multipartp != NULL) {
+	if (multipartp->line)
+	    free(multipartp->line);
+	free(multipartp);
     }
 
     if(charsetsave){
